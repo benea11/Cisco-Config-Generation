@@ -1,0 +1,4 @@
+priority-queue out
+srr-queue bandwidth share 1 30 35 5
+mls qos trust dscp
+speed auto 10 100
