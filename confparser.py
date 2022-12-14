@@ -1,7 +1,6 @@
 """
 Parse a block style document, such as Cisco configuration files, into a JSON
 formattable structure using dissectors.
-
 A dissector is a YAML formatted nested list of dicts with any of these keys:
 match    : A regular expression to match at the beginning of a line. The first
            unnamed capture group can be used as key or as value. Named capture
@@ -20,7 +19,6 @@ key      : Force capture group with specified index as key or generate unique
 action   : Perform specified action on first unnamed capture group or on whole
            match if no capture group specified. Not valid when 'child' is used.
 actionall: Perform specified action on all named capture groups.
-
 Supported actions are:
 expand   : Convert number ranges with hyphens and commas into list of numbers
 expand_f : Convert Foundry-style port ranges into list of ports
@@ -30,13 +28,10 @@ list     : Convert string to list unconditionally
 cidr     : Convert netmask to prefix length in IP address string
 bool     : Sets the value to False if the line starts with 'no' or else to True
 decrypt7 : Decrypts a Cisco type 7 password
-
 Existing values are not overwritten but will be extended as lists.
-
 Default parameters allow parsing of most configuration files.
 To parse NXOS use indent=2
 To parse VSP use indent=0, eob='exit'
-
 The Dissector class returns a Tree object which is a nested dict with attributes
 that reference the dissector and source file used. A dissector can be created
 from a string or a file and can parse an iterable, a string or a file. Multiple
