@@ -1,0 +1,34 @@
+switchport access vlan {{data_vlan}}
+description {{description}}
+
+{% if voice_vlan %}
+switchport voice vlan {{voice_vlan}}
+authentication event server dead action authorize vlan {{voice_vlan}}
+{% endif %}
+
+{% if port_security %}
+switchport port-security
+switchport port-security maximum {{ps_max}}
+switchport port-security violation restrict
+switchport port-security no logging event link-status
+{% endif %}
+
+{% if port_security_age %}
+switchport port-security aging time {{port_security_age}}
+{% endif %}
+
+{% if dhcp_snooping %}
+ip dhcp snooping trust
+{% endif %}
+
+switchport nonegotiate
+no logging event link-status
+cdp enable
+no snmp trap link-status
+storm-control broadcast level 60.00 50.00
+storm-control multicast level 60.00 50.00
+storm-control action shutdown
+spanning-tree portfast
+spanning-tree bpduguard enable
+service-policy input QoS
+service-policy output 2P6Q3T
