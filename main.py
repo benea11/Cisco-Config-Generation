@@ -2,12 +2,26 @@ from openpyxl import load_workbook
 import confparser
 from jinja2 import Template
 
+# TODO - Interface dictionary like below
+"""
+       interface_list.append({'original-interface': interface_id,
+                               'mode': mode,
+                               'description': description,
+                               'access_vlan': access_vlan,
+                               'voice_vlan': voice_vlan,
+                               'ps_max': ps_max,
+                               'ps_age': ps_aging_time,
+                               'dhcp_snoop': dhcp_snooping_trust,
+                               'shutdown': status,
+                               'channel': channel})
+"""
+
 
 def main(core_file, rack_port_xl, excluded_svi_lst):
     old_inventory, inventory_matrix = workbook_reader(input=rack_port_xl)
     nac_svi = svi_discovery(core_file, excluded_svi_lst)
 
-    old_config = config_parse("CSW.log")
+    old_config = config_parse("CSW.log")  #temporary
 
     for switch in old_inventory:
         destination = inventory_matrix[switch["old_sw_name"]]
@@ -33,6 +47,7 @@ def svi_discovery(core_sw, excluded_svi_lst):
     core_config = config_parse(core_sw)
     for interface in core_config['interface']:
         if 'Vlan' in interface and not 'shutdown' in core_config['interface'][interface]:
+            subnet_mask = False
             if core_config['interface'][interface]['ipv4']:
                 subnet_mask = int(core_config['interface'][interface]['ipv4'].split('/')[1])
             else:
