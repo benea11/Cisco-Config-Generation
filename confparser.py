@@ -42,6 +42,7 @@ dissector to a file. A hint is a regular expression that is unique to the first
 
 # Author: Tim Dorssers
 
+
 import re
 import json
 import yaml
