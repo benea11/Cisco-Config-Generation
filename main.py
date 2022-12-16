@@ -20,26 +20,82 @@ from jinja2 import Template
 def main(core_file, rack_port_xl, excluded_svi_lst):
     old_inventory, inventory_matrix = workbook_reader(input=rack_port_xl)
     nac_svi = svi_discovery(core_file, excluded_svi_lst)
+    for key in inventory_matrix:
+        old_config = config_parse(key + '.log')
+        templated_config = []
 
-    old_config = config_parse("CSW.log")  #temporary
+        for interface in old_config["interface"]:
+            if old_config["interface"][interface]["mode"] == "access":
 
+                description = ""
+                port_security = False
+                dhcp_snooping = False
+                interface_aaa = "nonac"
+                voice_vlan = False
+                ps_max = False
+                ps_aging_time = False
+                access_vlan = old_config['interface'][interface]["access_vlan"]
+                if old_config['interface'][interface]["description"]:
+                    description = old_config['interface'][interface]["description"]
+                if old_config['interface'][interface]["voice_vlan"]:
+                    voice_vlan = old_config['interface'][interface]["voice_vlan"]
+                if old_config['interface'][interface]["ps_max"]:
+                    ps_max = old_config['interface'][interface]["ps_max"]
+                    port_security = True
+                if old_config['interface'][interface]["ps_aging_time"]:
+                    ps_aging_time = old_config['interface'][interface]["ps_aging_time"]
+                if old_config['interface'][interface]["dhcp_snooping"]:
+                    dhcp_snooping = True
+                if old_config['interface'][interface]["dot1x_pae"] == "authenticator":
+                    interface_aaa = "nac_enforce"
+                if old_config['interface'][interface]["auth_open"]:
+                    interface_aaa = "nac_open"
+
+                input_list = {
+                    "interface": interface,
+                    "data_vlan": access_vlan,
+                    "description": description,
+                    "voice_vlan": voice_vlan,
+                    "ps_max": ps_max,
+                    "port_security_age": ps_aging_time,
+                    "dhcp_snooping": dhcp_snooping,
+                    "port_security": port_security
+                }
+                interface_config = templater(input_list, interface_aaa)
+
+                templated_config.append(interface_config)
+                ###  TODO: Here it is till 1 switch, need to add it to a dictionary or something to handle multi switches in the one input.xlsx
+                ###  Perhaps needs to be a dictionary to make the renaming of interfaces easier later???
+
+
+    #Here it does the interface rename magic..
     for switch in old_inventory:
         destination = inventory_matrix[switch["old_sw_name"]]
         f = open(str(destination) + ".txt", "a")
         port = 1
         while port < switch["capacity"] + 1:
-            stack_member = switch[port].split("/")[0]
-            destination_interface = switch[port].split("/")[1]
-            interface_syntax = str(stack_member) + "/0/" + str(destination_interface)
-            f.write("interface gig" + interface_syntax + "\n")
-            matching_values = [value for key, value in old_config["interface"].items() if
-                               interface_syntax.lower() in key.lower()]
-            """try:
-                f.write(str(matching_values[0]["mode"]) + "\n")
-            except:
-                f.write(str(matching_values) + "\n")"""
+            if switch[port] != "F":
+                stack_member = switch[port].split("/")[0]
+                destination_interface = switch[port].split("/")[1]
+                interface_syntax = str(stack_member) + "/0/" + str(destination_interface)
+                f.write("interface gig" + interface_syntax + "\n")
+                matching_values = [value for key, value in old_config["interface"].items() if
+                                   interface_syntax.lower() in key.lower()]
+                """try:
+                    f.write(str(matching_values[0]["mode"]) + "\n")
+                except:
+                    f.write(str(matching_values) + "\n")"""
 
             port += 1
+
+
+def templater(input_lst, interface_type):
+
+    with open("configs/interface_" + interface_type + ".j2", "r") as interface_file:
+        interface_template = interface_file.read()
+    t = Template(interface_template)
+    configuration = t.render(input_lst)
+    return configuration
 
 
 def svi_discovery(core_sw, excluded_svi_lst):
@@ -146,6 +202,7 @@ def index_containing_substring(the_list, substring):
 
 if __name__ == "__main__":
     excluded_svi_lst = [2]
+    access_file = "IN-HYD-00065-CSW-1F-01.log"
     core_file = "CSW.log"
     rack_port_xl = "input.xlsx"
     main(core_file, rack_port_xl, excluded_svi_lst)
