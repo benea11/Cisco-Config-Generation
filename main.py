@@ -4,13 +4,14 @@ from jinja2 import Template
 import logging.config
 import warnings
 from collections import ChainMap
+from datetime import datetime
   # TODO: If config file has sh run twice, breaks..
 
 
 def main(core_switch, rack_port_input, excluded_svi_input):
+    today = datetime.now()
     # Read the input xl, retrieve the matrix & to be port allocations
     old_inventory, inventory_matrix = workbook_reader(wb_input=rack_port_input)
-
     # Read core switch to find the active SVIs
     nac_svi = svi_discovery(core_switch, excluded_svi_input)  # TODO: SVI logic
 
@@ -28,8 +29,13 @@ def main(core_switch, rack_port_input, excluded_svi_input):
         # Interface Matrix:
         # At this point we have a matrix where the key is the existing interface, and the value is the destination
         for interface in old_config["interface"]:  # For every interface in the old config file..
+            logger.debug(interface + " was returned when looping interfaces in the old config file")
             # I want to take the old interface, and match it against the destined interface
+            if isinstance(old_config["interface"][interface]['mode'], list):
+                logger.error("Show Running Config is duplicated in the file: " + key + ".log!")
+                exit()
             if old_config["interface"][interface]["mode"] == "access":  # but only if it's an access interface
+                logger.debug(interface + " is an access interface")
                 int_refactor = interface.split('net')[1].split('/')  # Start to format the interface to be the same as interface_matrix
                 if get_number_of_elements(int_refactor) == 3:  # fix incase we encounter FA interfaces
                     int_refactor.pop(1)  # fix incase we encounter FA interfaces
@@ -80,12 +86,12 @@ def main(core_switch, rack_port_input, excluded_svi_input):
 
                 templated_config.append(interface_config)  # Append interface config to list
 
-    logger.debug(templated_config)
+        logger.debug(templated_config)
 
-    with open('output', 'a') as file:
-        for command in templated_config:
-            file.write(command)
-        file.close()
+        with open(inventory_matrix[key] + '-' + today.strftime("%d%b%Y%-H%M%S") + '.txt', 'a') as file:
+            for command in templated_config:
+                file.write(command)
+            file.close()
 
 
 def templater(input_lst, interface_type):
