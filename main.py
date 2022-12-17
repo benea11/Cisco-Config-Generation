@@ -10,12 +10,11 @@ from datetime import datetime
 def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
     today = datetime.now()
     # Read the input xl, retrieve the matrix & to be port allocations
-    old_inventory, inventory_matrix = workbook_reader(wb_input=rack_port_input)
+    old_inventory, inventory_matrix = port_availability_workbook_reader(wb_input=rack_port_input)
     # Read core switch to find the active SVIs
     nac_svi = []
     if svi_nac:
         nac_svi = svi_discovery(core_switch, excluded_svi_input)  # TODO: SVI logic
-
     # Grab the config of the old switch, parse it into a variable
     for key in inventory_matrix:
         old_config = config_parse(key + '.log')
@@ -95,10 +94,25 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
 
         logger.debug(templated_config)
 
+        uplinks = core_port_workbook_reader(wb_input=rack_port_input, cp_wb_input=inventory_matrix[key])
+        for uplink_interface in uplinks:
+            input_list = {
+                "interface": uplink_interface['access_side_interface'],
+                "description": "To " + uplink_interface['core_hostname'] + " " + uplink_interface['core_side_interface']
+            }
+            trunk_config = templater(input_list, 'trunk')
+            templated_config.append(trunk_config)
+        input_list = {
+            "description": "To " + uplinks[0]['core_hostname']
+        }
+        port_channel_config = templater(input_list, 'etherchannel')
+        templated_config.append(port_channel_config)
+
         with open(inventory_matrix[key] + '-' + today.strftime("%d%b%Y%-H%M%S") + '.txt', 'a') as file:
             for command in templated_config:
                 file.write(command)
             file.close()
+
 
 
 def templater(input_lst, interface_type):
@@ -131,7 +145,25 @@ def config_parse(file):
     return dissector.parse_file(file)
 
 
-def workbook_reader(wb_input):
+def core_port_workbook_reader(wb_input, cp_wb_input):
+    wb = load_workbook(filename=wb_input, data_only=True)
+    sheet_name = wb.sheetnames[index_containing_substring(wb.sheetnames, "Core Port Layout")]
+    sheet = wb[sheet_name]
+    e_cell = 1
+    output = []
+    while e_cell < 10000:
+        if sheet["E" + str(e_cell)].value == cp_wb_input:
+            output.append({"core_hostname":sheet["A" + str(e_cell)].value,
+                            "core_side_interface":sheet["B" + str(e_cell)].value,
+                           "access_hostname": sheet["E" + str(e_cell)].value,
+                           "access_side_interface":sheet["D" + str(e_cell)].value})
+            e_cell +=1
+        else:
+            e_cell += 1
+    return output
+
+
+def port_availability_workbook_reader(wb_input):
     wb = load_workbook(filename=wb_input, data_only=True)
     sheet_name = wb.sheetnames[index_containing_substring(wb.sheetnames, "availability")]
     sheet = wb[sheet_name]
@@ -203,6 +235,7 @@ def workbook_reader(wb_input):
             old_inventory.append(output)
         else:
             e_cell += 1
+
     return old_inventory, inventory_matrix
 
 
@@ -237,3 +270,13 @@ if __name__ == "__main__":
     rack_port_xl = "input.xlsx"
     SVI_NAC_option = True
     main(core_file, rack_port_xl, excluded_svi_lst, SVI_NAC_option)
+
+
+    """
+    TODO: Trunks
+    - Always channel group 1 on access switches
+    - DHCP Snooping Trust
+    - UDLD always on interface of a etherchannel
+    - Always active.
+    - No filtering of vlans to start
+    """
