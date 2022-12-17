@@ -1,10 +1,10 @@
-from openpyxl import load_workbook
-import confparser
-from jinja2 import Template
-import logging.config
-import warnings
-from collections import ChainMap
-from datetime import datetime
+from openpyxl import load_workbook  # Excel reader
+import confparser  # Author: Tim Dorssers
+from jinja2 import Template  # Templates
+import logging.config, time  # Logger
+import warnings  # Used to supress warnings from Excel reader
+from collections import ChainMap  # used to merge multiple dictionaries into 1
+from datetime import datetime  # For timing execution time & output file naming
 
 
 def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
@@ -16,7 +16,7 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
     if svi_nac:
         nac_svi = svi_discovery(core_switch, excluded_svi_input)  # TODO: SVI logic
     # Grab the config of the old switch, parse it into a variable
-    for key in inventory_matrix:
+    for key in inventory_matrix:  # Start looping through switches
         old_config = config_parse(key + '.log')
         templated_config = []
         old_interfaces = []
@@ -255,6 +255,7 @@ def get_number_of_elements(input_list):
 
 
 if __name__ == "__main__":
+    start_time = time.time()
     # setup logging
     warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
     logging.config.fileConfig(fname='logging.conf', disable_existing_loggers=True)
@@ -270,7 +271,9 @@ if __name__ == "__main__":
     rack_port_xl = "input.xlsx"
     SVI_NAC_option = True
     main(core_file, rack_port_xl, excluded_svi_lst, SVI_NAC_option)
-
+    run_time = time.time() - start_time
+    run_time = round(run_time, 2)
+    logger.info("Time to run: " + str(run_time) + " seconds")
 
     """
     TODO: Trunks
