@@ -3,11 +3,14 @@ import confparser
 from jinja2 import Template
 import logging.config
 import warnings
+from collections import ChainMap
+  # TODO: If config file has sh run twice, breaks..
 
 
 def main(core_switch, rack_port_input, excluded_svi_input):
     # Read the input xl, retrieve the matrix & to be port allocations
     old_inventory, inventory_matrix = workbook_reader(wb_input=rack_port_input)
+
     # Read core switch to find the active SVIs
     nac_svi = svi_discovery(core_switch, excluded_svi_input)  # TODO: SVI logic
 
@@ -19,59 +22,71 @@ def main(core_switch, rack_port_input, excluded_svi_input):
         # Get the interface changes from the output of the xl
         for old_switch_stack in old_inventory:
             if key == old_switch_stack['old_sw_name']:
-                old_interfaces.append(old_switch_stack['interfaces'])
-
+                old_interfaces.append(old_switch_stack['interfaces'])  # FROM THE EXCEL FILE
+        interface_matrix = dict(ChainMap(*old_interfaces))  # merge the entire stack of interfaces into 1 dictionary
         # Build the templates according to the old interface names
-        for interface in old_config["interface"]:
-            if old_config["interface"][interface]["mode"] == "access":  # Only match on access interfaces
-                int_refactor = interface.split('net')[1].split('/')
-                if get_number_of_elements(int_refactor) == 3:
+        # Interface Matrix:
+        # At this point we have a matrix where the key is the existing interface, and the value is the destination
+        for interface in old_config["interface"]:  # For every interface in the old config file..
+            # I want to take the old interface, and match it against the destined interface
+            if old_config["interface"][interface]["mode"] == "access":  # but only if it's an access interface
+                int_refactor = interface.split('net')[1].split('/')  # Start to format the interface to be the same as interface_matrix
+                if get_number_of_elements(int_refactor) == 3:  # fix incase we encounter FA interfaces
                     int_refactor.pop(1)  # fix incase we encounter FA interfaces
-                int_match = int_refactor[0] + '/' + int_refactor[1]  # format the same as old_interfaces var
-                int_result = "GigabitEthernet" + int_refactor[0] + '/0/' + int_refactor[1]  # format interface names
+                int_match = int_refactor[0] + '/' + int_refactor[1]  # Formatting done.
+                target_interface = interface_matrix[int_match]  # Find the target interface
 
-                for switches in old_interfaces:
-                    interface_list = list(switches.values())  # create a list from the values of the dictionary
-                    if int_match in interface_list:  # This excludes "F" interfaces and unused Interfaces.
-                        # TODO Shutdown unused interfaces
-                        description = " "
-                        port_security = False
-                        dhcp_snooping = False
-                        interface_aaa = "nonac"  # Default as NO NAC Interface
-                        voice_vlan = False
-                        ps_max = False
-                        ps_aging_time = False
-                        access_vlan = old_config['interface'][interface]["access_vlan"]  # Retain previous data VLAN
-                        if old_config['interface'][interface]["description"]:
-                            description = old_config['interface'][interface]["description"]  # Retain old value
-                        if old_config['interface'][interface]["voice_vlan"]:
-                            voice_vlan = old_config['interface'][interface]["voice_vlan"]  # Retain old value
-                        if old_config['interface'][interface]["ps_max"]:
-                            ps_max = old_config['interface'][interface]["ps_max"]  # Retain old value
-                            port_security = True
-                        if old_config['interface'][interface]["ps_aging_time"]:
-                            ps_aging_time = old_config['interface'][interface]["ps_aging_time"]  # Retain old value
-                        if old_config['interface'][interface]["dhcp_snooping"]:
-                            dhcp_snooping = True  # Retain old value
-                        if old_config['interface'][interface]["dot1x_pae"] == "authenticator":
-                            interface_aaa = "nac_enforce"  # If dot1x pae is configured, default to NAC enforce mode
-                        if old_config['interface'][interface]["auth_open"]:
-                            interface_aaa = "nac_open"  # If authentication open is configured, default to NAC Open mode
+                if target_interface == "F":
+                    continue
+                else:
+                    target_interface = target_interface.split("/")
+                    target_interface = "GigabitEthernet"+target_interface[0]+"/0/"+target_interface[1]
+                logger.info(interface + " moves to " + target_interface)
+                description = False
+                port_security = False
+                dhcp_snooping = False
+                interface_aaa = "nonac"  # Default as NO NAC Interface
+                voice_vlan = False
+                ps_max = False
+                ps_aging_time = False
+                access_vlan = old_config['interface'][interface]["access_vlan"]  # Retain previous data VLAN
+                if old_config['interface'][interface]["description"]:
+                    description = old_config['interface'][interface]["description"]  # Retain old value
+                if old_config['interface'][interface]["voice_vlan"]:
+                    voice_vlan = old_config['interface'][interface]["voice_vlan"]  # Retain old value
+                if old_config['interface'][interface]["ps_max"]:
+                    ps_max = old_config['interface'][interface]["ps_max"]  # Retain old value
+                    port_security = True
+                if old_config['interface'][interface]["ps_aging_time"]:
+                    ps_aging_time = old_config['interface'][interface]["ps_aging_time"]  # Retain old value
+                if old_config['interface'][interface]["dhcp_snooping"]:
+                    dhcp_snooping = True  # Retain old value
+                if old_config['interface'][interface]["dot1x_pae"] == "authenticator":
+                    interface_aaa = "nac_enforce"  # If dot1x pae is configured, default to NAC enforce mode
+                if old_config['interface'][interface]["auth_open"]:
+                    interface_aaa = "nac_open"  # If authentication open is configured, default to NAC Open mode
 
-                        input_list = {
-                            "interface": int_result,
-                            "data_vlan": access_vlan,
-                            "description": description,
-                            "voice_vlan": voice_vlan,
-                            "ps_max": ps_max,
-                            "port_security_age": ps_aging_time,
-                            "dhcp_snooping": dhcp_snooping,
-                            "port_security": port_security
-                        }
-                        interface_config = templater(input_list, interface_aaa)  # Build interface config
+                input_list = {
+                    "interface": target_interface,
+                    "data_vlan": access_vlan,
+                    "description": description,
+                    "voice_vlan": voice_vlan,
+                    "ps_max": ps_max,
+                    "port_security_age": ps_aging_time,
+                    "dhcp_snooping": dhcp_snooping,
+                    "port_security": port_security
+                }
+                interface_config = templater(input_list, interface_aaa)  # Build interface config
 
-                        templated_config.append(interface_config)  # Append interface config to list
+                templated_config.append(interface_config)  # Append interface config to list
+
     logger.debug(templated_config)
+
+    with open('output', 'a') as file:
+        for command in templated_config:
+            file.write(command)
+        file.close()
+
 
 def templater(input_lst, interface_type):
     with open("configs/interface_" + interface_type + ".j2", "r") as interface_file:
@@ -90,7 +105,7 @@ def svi_discovery(core_sw, excluded_svi_list):
             if core_config['interface'][interface]['ipv4']:
                 subnet_mask = int(core_config['interface'][interface]['ipv4'].split('/')[1])
             else:
-                logger.warning(interface + ': no IP address configured on this active svi, ignoring')
+                logger.warning(interface + ' has no IP address configured on this active svi, ignoring this SVI')
             if subnet_mask and subnet_mask < 28:
                 target_interface = interface.split("n", 1)
                 output.append(target_interface[1])
@@ -137,7 +152,7 @@ def workbook_reader(wb_input):
                         result = sheet[port + str(e_cell + 2)].value
 
                     output['interfaces'].update({
-                        port_number: result
+                        str(stack_member) + "/" + str(port_number): result
                     })
                     port_number += 2
                 if port == "AA":
@@ -148,7 +163,7 @@ def workbook_reader(wb_input):
                             result = sheet[port + str(e_cell + 2)].value
 
                         output['interfaces'].update({
-                            port_number: result
+                            str(stack_member) + "/" + str(port_number): result
                         })
                     e_cell += 1
                     port = "D"
@@ -166,7 +181,7 @@ def workbook_reader(wb_input):
                         result = sheet[port + str(e_cell + 2)].value
 
                     output['interfaces'].update({
-                        port_number: result
+                        str(stack_member) + "/" + str(port_number): result
                     })
                     port_number += 2
                     port = "AA"
@@ -204,7 +219,6 @@ if __name__ == "__main__":
     logger.addHandler(stream)
 
     excluded_svi_lst = [2]
-    access_file = "IN-HYD-00065-CSW-1F-01.log"
     core_file = "CSW.log"
     rack_port_xl = "input.xlsx"
     main(core_file, rack_port_xl, excluded_svi_lst)
