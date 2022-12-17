@@ -1,14 +1,15 @@
 from openpyxl import load_workbook
 import confparser
 from jinja2 import Template
-import re
+import logging.config
+import warnings
 
 
-def main(core_file, rack_port_xl, excluded_svi_lst):
+def main(core_switch, rack_port_input, excluded_svi_input):
     # Read the input xl, retrieve the matrix & to be port allocations
-    old_inventory, inventory_matrix = workbook_reader(input=rack_port_xl)
+    old_inventory, inventory_matrix = workbook_reader(wb_input=rack_port_input)
     # Read core switch to find the active SVIs
-    nac_svi = svi_discovery(core_file, excluded_svi_lst)
+    nac_svi = svi_discovery(core_switch, excluded_svi_input)  # TODO: SVI logic
 
     # Grab the config of the old switch, parse it into a variable
     for key in inventory_matrix:
@@ -70,13 +71,9 @@ def main(core_file, rack_port_xl, excluded_svi_lst):
                         interface_config = templater(input_list, interface_aaa)  # Build interface config
 
                         templated_config.append(interface_config)  # Append interface config to list
-
-    for i in templated_config:
-        print(i)
-
+    logger.debug(templated_config)
 
 def templater(input_lst, interface_type):
-
     with open("configs/interface_" + interface_type + ".j2", "r") as interface_file:
         interface_template = interface_file.read()
     t = Template(interface_template)  # loads template
@@ -84,7 +81,7 @@ def templater(input_lst, interface_type):
     return configuration
 
 
-def svi_discovery(core_sw, excluded_svi_lst):
+def svi_discovery(core_sw, excluded_svi_list):
     output = []
     core_config = config_parse(core_sw)
     for interface in core_config['interface']:
@@ -93,11 +90,11 @@ def svi_discovery(core_sw, excluded_svi_lst):
             if core_config['interface'][interface]['ipv4']:
                 subnet_mask = int(core_config['interface'][interface]['ipv4'].split('/')[1])
             else:
-                print(interface, 'No ip address configured on this svi, and it is not shutdown')
+                logger.warning(interface + ': no IP address configured on this active svi, ignoring')
             if subnet_mask and subnet_mask < 28:
                 target_interface = interface.split("n", 1)
                 output.append(target_interface[1])
-    output = list(set(output) - set(excluded_svi_lst))  # Remove any VLANs specifically set to exclude
+    output = list(set(output) - set(excluded_svi_list))  # Remove any VLANs specifically set to exclude
     return output
 
 
@@ -106,8 +103,8 @@ def config_parse(file):
     return dissector.parse_file(file)
 
 
-def workbook_reader(input):
-    wb = load_workbook(filename=input, data_only=True)
+def workbook_reader(wb_input):
+    wb = load_workbook(filename=wb_input, data_only=True)
     sheet_name = wb.sheetnames[index_containing_substring(wb.sheetnames, "availability")]
     sheet = wb[sheet_name]
     e_cell = 1
@@ -131,6 +128,7 @@ def workbook_reader(input):
             port = "D"
             port_number = 1
             row = 1
+            result = False
             while port_number < switch_capacity + 1:
                 if "Z" not in port or "AA" not in port:
                     if not sheet[port + str(e_cell + 2)].value:
@@ -187,16 +185,32 @@ def index_containing_substring(the_list, substring):
     return -1
 
 
-def get_number_of_elements(list):
+def get_number_of_elements(input_list):
     count = 0
-    for element in list:
+    for element in input_list:
         count += 1
     return count
 
 
 if __name__ == "__main__":
+    # setup logging
+    warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
+    logging.config.fileConfig(fname='logging.conf', disable_existing_loggers=True)
+    stream = logging.StreamHandler()
+    stream_format = logging.Formatter("%(levelname)s:%(module)s:%(lineno)d:%(message)s")
+    stream.setFormatter(stream_format)
+    logger = logging.getLogger(__name__)
+    logger.propagate = False
+    logger.addHandler(stream)
+
     excluded_svi_lst = [2]
     access_file = "IN-HYD-00065-CSW-1F-01.log"
     core_file = "CSW.log"
     rack_port_xl = "input.xlsx"
     main(core_file, rack_port_xl, excluded_svi_lst)
+
+    """logger.debug("debug")
+    logger.critical("critical")
+    logger.error("error")
+    logger.warning("warning")
+    logger.info("info")"""
