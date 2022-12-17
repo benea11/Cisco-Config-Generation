@@ -5,15 +5,15 @@ import logging.config
 import warnings
 from collections import ChainMap
 from datetime import datetime
-  # TODO: If config file has sh run twice, breaks..
 
 
-def main(core_switch, rack_port_input, excluded_svi_input, SVI_NAC):
+def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
     today = datetime.now()
     # Read the input xl, retrieve the matrix & to be port allocations
     old_inventory, inventory_matrix = workbook_reader(wb_input=rack_port_input)
     # Read core switch to find the active SVIs
-    if SVI_NAC:
+    nac_svi = []
+    if svi_nac:
         nac_svi = svi_discovery(core_switch, excluded_svi_input)  # TODO: SVI logic
 
     # Grab the config of the old switch, parse it into a variable
@@ -29,7 +29,7 @@ def main(core_switch, rack_port_input, excluded_svi_input, SVI_NAC):
         # Build the templates according to the old interface names
         # Interface Matrix:
         # At this point we have a matrix where the key is the existing interface, and the value is the destination
-        for interface in old_config["interface"]:  # For every interface in the old config file..
+        for interface in old_config["interface"]:  # For every interface in the old config file.
             logger.debug(interface + " was returned when looping interfaces in the old config file")
             # I want to take the old interface, and match it against the destined interface
             if isinstance(old_config["interface"][interface]['mode'], list):
@@ -37,7 +37,8 @@ def main(core_switch, rack_port_input, excluded_svi_input, SVI_NAC):
                 exit()
             if old_config["interface"][interface]["mode"] == "access":  # but only if it's an access interface
                 logger.debug(interface + " is an access interface")
-                int_refactor = interface.split('net')[1].split('/')  # Start to format the interface to be the same as interface_matrix
+                int_refactor = interface.split('net')[1].split(
+                    '/')  # Start to format the interface to be the same as interface_matrix
                 if get_number_of_elements(int_refactor) == 3:  # fix incase we encounter FA interfaces
                     int_refactor.pop(1)  # fix incase we encounter FA interfaces
                 int_match = int_refactor[0] + '/' + int_refactor[1]  # Formatting done.
@@ -47,7 +48,7 @@ def main(core_switch, rack_port_input, excluded_svi_input, SVI_NAC):
                     continue
                 else:
                     target_interface = target_interface.split("/")
-                    target_interface = "GigabitEthernet"+target_interface[0]+"/0/"+target_interface[1]
+                    target_interface = "GigabitEthernet" + target_interface[0] + "/0/" + target_interface[1]
                 logger.info(interface + " moves to " + target_interface)
                 description = False
                 port_security = False
@@ -72,7 +73,7 @@ def main(core_switch, rack_port_input, excluded_svi_input, SVI_NAC):
                     interface_aaa = "nac_enforce"  # If dot1x pae is configured, default to NAC enforce mode
                 if old_config['interface'][interface]["auth_open"]:
                     interface_aaa = "nac_open"  # If authentication open is configured, default to NAC Open mode
-                if SVI_NAC:
+                if svi_nac:
                     if access_vlan in nac_svi:
                         interface_aaa = "nac_open"
                     if access_vlan not in nac_svi:
@@ -112,7 +113,7 @@ def svi_discovery(core_sw, excluded_svi_list):
     output = []
     core_config = config_parse(core_sw)
     for interface in core_config['interface']:
-        if 'Vlan' in interface and not 'shutdown' in core_config['interface'][interface]:
+        if 'Vlan' in interface and 'shutdown' not in core_config['interface'][interface]:
             subnet_mask = False
             if core_config['interface'][interface]['ipv4']:
                 subnet_mask = int(core_config['interface'][interface]['ipv4'].split('/')[1])
@@ -215,6 +216,7 @@ def index_containing_substring(the_list, substring):
 def get_number_of_elements(input_list):
     count = 0
     for element in input_list:
+        logger.debug(element)
         count += 1
     return count
 
