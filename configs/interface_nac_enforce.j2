@@ -15,7 +15,6 @@ authentication event server dead action authorize vlan {{voice_vlan}}
 switchport port-security
 switchport port-security maximum {{ps_max}}
 switchport port-security violation restrict
-switchport port-security no logging event link-status
 {% endif -%}
 {% if port_security_age -%}
 switchport port-security aging time {{port_security_age}}
@@ -23,6 +22,7 @@ switchport port-security aging time {{port_security_age}}
 {% if dhcp_snooping -%}
 ip dhcp snooping trust
 {% endif -%}
+no logging event link-status
 switchport nonegotiate
 no snmp trap link-status
 storm-control broadcast level 60.00 50.00
