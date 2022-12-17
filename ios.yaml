@@ -44,6 +44,9 @@
 - match: interface (\S+)
   parent: interface
   child:
+  - match: authentication open
+    name: auth_open
+    action: bool
   - match: description (?P<description>.*)
   - match: (?:no )?switchport$
     name: switchport
