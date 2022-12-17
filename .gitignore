@@ -130,3 +130,4 @@ dmypy.json
 *.log
 .DS_STORE
 *.xlsx
+*.txt
