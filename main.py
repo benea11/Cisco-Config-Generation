@@ -8,12 +8,13 @@ from datetime import datetime
   # TODO: If config file has sh run twice, breaks..
 
 
-def main(core_switch, rack_port_input, excluded_svi_input):
+def main(core_switch, rack_port_input, excluded_svi_input, SVI_NAC):
     today = datetime.now()
     # Read the input xl, retrieve the matrix & to be port allocations
     old_inventory, inventory_matrix = workbook_reader(wb_input=rack_port_input)
     # Read core switch to find the active SVIs
-    nac_svi = svi_discovery(core_switch, excluded_svi_input)  # TODO: SVI logic
+    if SVI_NAC:
+        nac_svi = svi_discovery(core_switch, excluded_svi_input)  # TODO: SVI logic
 
     # Grab the config of the old switch, parse it into a variable
     for key in inventory_matrix:
@@ -71,6 +72,11 @@ def main(core_switch, rack_port_input, excluded_svi_input):
                     interface_aaa = "nac_enforce"  # If dot1x pae is configured, default to NAC enforce mode
                 if old_config['interface'][interface]["auth_open"]:
                     interface_aaa = "nac_open"  # If authentication open is configured, default to NAC Open mode
+                if SVI_NAC:
+                    if access_vlan in nac_svi:
+                        interface_aaa = "nac_open"
+                    if access_vlan not in nac_svi:
+                        interface_aaa = "nonac"
 
                 input_list = {
                     "interface": target_interface,
@@ -227,10 +233,5 @@ if __name__ == "__main__":
     excluded_svi_lst = [2]
     core_file = "CSW.log"
     rack_port_xl = "input.xlsx"
-    main(core_file, rack_port_xl, excluded_svi_lst)
-
-    """logger.debug("debug")
-    logger.critical("critical")
-    logger.error("error")
-    logger.warning("warning")
-    logger.info("info")"""
+    SVI_NAC_option = True
+    main(core_file, rack_port_xl, excluded_svi_lst, SVI_NAC_option)
