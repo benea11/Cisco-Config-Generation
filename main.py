@@ -100,7 +100,7 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
                 "interface": uplink_interface['access_side_interface'],
                 "description": "To " + uplink_interface['core_hostname'] + " " + uplink_interface['core_side_interface']
             }
-            trunk_config = templater(input_list, 'trunk')
+            trunk_config = templater(input_list, 'up_trunk')
             templated_config.append(trunk_config)
         input_list = {
             "description": "To " + uplinks[0]['core_hostname']
