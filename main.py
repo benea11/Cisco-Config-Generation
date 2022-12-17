@@ -1,100 +1,86 @@
 from openpyxl import load_workbook
 import confparser
 from jinja2 import Template
-
-# TODO - Interface dictionary like below
-"""
-       interface_list.append({'original-interface': interface_id,
-                               'mode': mode,
-                               'description': description,
-                               'access_vlan': access_vlan,
-                               'voice_vlan': voice_vlan,
-                               'ps_max': ps_max,
-                               'ps_age': ps_aging_time,
-                               'dhcp_snoop': dhcp_snooping_trust,
-                               'shutdown': status,
-                               'channel': channel})
-"""
+import re
 
 
 def main(core_file, rack_port_xl, excluded_svi_lst):
+    # Read the input xl, retrieve the matrix & to be port allocations
     old_inventory, inventory_matrix = workbook_reader(input=rack_port_xl)
+    # Read core switch to find the active SVIs
     nac_svi = svi_discovery(core_file, excluded_svi_lst)
+
+    # Grab the config of the old switch, parse it into a variable
     for key in inventory_matrix:
         old_config = config_parse(key + '.log')
         templated_config = []
+        old_interfaces = []
+        # Get the interface changes from the output of the xl
+        for old_switch_stack in old_inventory:
+            if key == old_switch_stack['old_sw_name']:
+                old_interfaces.append(old_switch_stack['interfaces'])
 
+        # Build the templates according to the old interface names
         for interface in old_config["interface"]:
-            if old_config["interface"][interface]["mode"] == "access":
+            if old_config["interface"][interface]["mode"] == "access":  # Only match on access interfaces
+                int_refactor = interface.split('net')[1].split('/')
+                if get_number_of_elements(int_refactor) == 3:
+                    int_refactor.pop(1)  # fix incase we encounter FA interfaces
+                int_match = int_refactor[0] + '/' + int_refactor[1]  # format the same as old_interfaces var
+                int_result = "GigabitEthernet" + int_refactor[0] + '/0/' + int_refactor[1]  # format interface names
 
-                description = ""
-                port_security = False
-                dhcp_snooping = False
-                interface_aaa = "nonac"
-                voice_vlan = False
-                ps_max = False
-                ps_aging_time = False
-                access_vlan = old_config['interface'][interface]["access_vlan"]
-                if old_config['interface'][interface]["description"]:
-                    description = old_config['interface'][interface]["description"]
-                if old_config['interface'][interface]["voice_vlan"]:
-                    voice_vlan = old_config['interface'][interface]["voice_vlan"]
-                if old_config['interface'][interface]["ps_max"]:
-                    ps_max = old_config['interface'][interface]["ps_max"]
-                    port_security = True
-                if old_config['interface'][interface]["ps_aging_time"]:
-                    ps_aging_time = old_config['interface'][interface]["ps_aging_time"]
-                if old_config['interface'][interface]["dhcp_snooping"]:
-                    dhcp_snooping = True
-                if old_config['interface'][interface]["dot1x_pae"] == "authenticator":
-                    interface_aaa = "nac_enforce"
-                if old_config['interface'][interface]["auth_open"]:
-                    interface_aaa = "nac_open"
+                for switches in old_interfaces:
+                    interface_list = list(switches.values())  # create a list from the values of the dictionary
+                    if int_match in interface_list:  # This excludes "F" interfaces and unused Interfaces.
+                        # TODO Shutdown unused interfaces
+                        description = " "
+                        port_security = False
+                        dhcp_snooping = False
+                        interface_aaa = "nonac"  # Default as NO NAC Interface
+                        voice_vlan = False
+                        ps_max = False
+                        ps_aging_time = False
+                        access_vlan = old_config['interface'][interface]["access_vlan"]  # Retain previous data VLAN
+                        if old_config['interface'][interface]["description"]:
+                            description = old_config['interface'][interface]["description"]  # Retain old value
+                        if old_config['interface'][interface]["voice_vlan"]:
+                            voice_vlan = old_config['interface'][interface]["voice_vlan"]  # Retain old value
+                        if old_config['interface'][interface]["ps_max"]:
+                            ps_max = old_config['interface'][interface]["ps_max"]  # Retain old value
+                            port_security = True
+                        if old_config['interface'][interface]["ps_aging_time"]:
+                            ps_aging_time = old_config['interface'][interface]["ps_aging_time"]  # Retain old value
+                        if old_config['interface'][interface]["dhcp_snooping"]:
+                            dhcp_snooping = True  # Retain old value
+                        if old_config['interface'][interface]["dot1x_pae"] == "authenticator":
+                            interface_aaa = "nac_enforce"  # If dot1x pae is configured, default to NAC enforce mode
+                        if old_config['interface'][interface]["auth_open"]:
+                            interface_aaa = "nac_open"  # If authentication open is configured, default to NAC Open mode
 
-                input_list = {
-                    "interface": interface,
-                    "data_vlan": access_vlan,
-                    "description": description,
-                    "voice_vlan": voice_vlan,
-                    "ps_max": ps_max,
-                    "port_security_age": ps_aging_time,
-                    "dhcp_snooping": dhcp_snooping,
-                    "port_security": port_security
-                }
-                interface_config = templater(input_list, interface_aaa)
+                        input_list = {
+                            "interface": int_result,
+                            "data_vlan": access_vlan,
+                            "description": description,
+                            "voice_vlan": voice_vlan,
+                            "ps_max": ps_max,
+                            "port_security_age": ps_aging_time,
+                            "dhcp_snooping": dhcp_snooping,
+                            "port_security": port_security
+                        }
+                        interface_config = templater(input_list, interface_aaa)  # Build interface config
 
-                templated_config.append(interface_config)
-                ###  TODO: Here it is till 1 switch, need to add it to a dictionary or something to handle multi switches in the one input.xlsx
-                ###  Perhaps needs to be a dictionary to make the renaming of interfaces easier later???
+                        templated_config.append(interface_config)  # Append interface config to list
 
-
-    #Here it does the interface rename magic..
-    for switch in old_inventory:
-        destination = inventory_matrix[switch["old_sw_name"]]
-        f = open(str(destination) + ".txt", "a")
-        port = 1
-        while port < switch["capacity"] + 1:
-            if switch[port] != "F":
-                stack_member = switch[port].split("/")[0]
-                destination_interface = switch[port].split("/")[1]
-                interface_syntax = str(stack_member) + "/0/" + str(destination_interface)
-                f.write("interface gig" + interface_syntax + "\n")
-                matching_values = [value for key, value in old_config["interface"].items() if
-                                   interface_syntax.lower() in key.lower()]
-                """try:
-                    f.write(str(matching_values[0]["mode"]) + "\n")
-                except:
-                    f.write(str(matching_values) + "\n")"""
-
-            port += 1
+    for i in templated_config:
+        print(i)
 
 
 def templater(input_lst, interface_type):
 
     with open("configs/interface_" + interface_type + ".j2", "r") as interface_file:
         interface_template = interface_file.read()
-    t = Template(interface_template)
-    configuration = t.render(input_lst)
+    t = Template(interface_template)  # loads template
+    configuration = t.render(input_lst)  # renders template
     return configuration
 
 
@@ -111,7 +97,7 @@ def svi_discovery(core_sw, excluded_svi_lst):
             if subnet_mask and subnet_mask < 28:
                 target_interface = interface.split("n", 1)
                 output.append(target_interface[1])
-    output = list(set(output) - set(excluded_svi_lst))
+    output = list(set(output) - set(excluded_svi_lst))  # Remove any VLANs specifically set to exclude
     return output
 
 
@@ -128,11 +114,12 @@ def workbook_reader(input):
     old_inventory = []
     inventory_matrix = {}
     while e_cell < 10000:
-        output = {}
+        output = {"interfaces": {}}
         if sheet["E" + str(e_cell)].value == "Switch Name: ":
             old_sw = sheet["H" + str(e_cell)].value
             new_sw = sheet["Y" + str(e_cell)].value
             stack_member = sheet["R" + str(e_cell)].value
+            output.update({"old_stack_id": stack_member})
             output.update({"old_sw_name": old_sw})
             inventory_matrix.update({old_sw: new_sw})
             switch_capacity = 0
@@ -151,7 +138,7 @@ def workbook_reader(input):
                     if sheet[port + str(e_cell + 2)].value:
                         result = sheet[port + str(e_cell + 2)].value
 
-                    output.update({
+                    output['interfaces'].update({
                         port_number: result
                     })
                     port_number += 2
@@ -162,7 +149,7 @@ def workbook_reader(input):
                         if sheet[port + str(e_cell + 2)].value:
                             result = sheet[port + str(e_cell + 2)].value
 
-                        output.update({
+                        output['interfaces'].update({
                             port_number: result
                         })
                     e_cell += 1
@@ -180,7 +167,7 @@ def workbook_reader(input):
                     if sheet[port + str(e_cell + 2)].value:
                         result = sheet[port + str(e_cell + 2)].value
 
-                    output.update({
+                    output['interfaces'].update({
                         port_number: result
                     })
                     port_number += 2
@@ -198,6 +185,13 @@ def index_containing_substring(the_list, substring):
         if substring in s:
             return i
     return -1
+
+
+def get_number_of_elements(list):
+    count = 0
+    for element in list:
+        count += 1
+    return count
 
 
 if __name__ == "__main__":
