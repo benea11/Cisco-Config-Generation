@@ -7,7 +7,6 @@ description {{description}}
 {% endif -%}
 {% if voice_vlan -%}
 switchport voice vlan {{voice_vlan}}
-authentication event server dead action authorize vlan {{voice_vlan}}
 {% endif -%}
 {% if port_security -%}
 switchport port-security
