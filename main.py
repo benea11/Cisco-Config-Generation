@@ -8,6 +8,8 @@ from datetime import datetime  # For timing execution time & output file naming
 
 
 def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
+    used_interfaces = []
+    counted_stacks = []
     today = datetime.now()
     # Read the input xl, retrieve the matrix & to be port allocations
     old_inventory, inventory_matrix = port_availability_workbook_reader(wb_input=rack_port_input)
@@ -24,19 +26,20 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
         for old_switch_stack in old_inventory:
             if key == old_switch_stack['old_sw_name']:
                 old_interfaces.append(old_switch_stack['interfaces'])  # FROM THE EXCEL FILE
+                capacity = old_switch_stack['capacity']
         interface_matrix = dict(ChainMap(*old_interfaces))  # merge the entire stack of interfaces into 1 dictionary
         # Build the templates according to the old interface names
         # Interface Matrix:
         # At this point we have a matrix where the key is the existing interface, and the value is the destination
-        for interface in old_config["interface"]:  # For every interface in the old config file.
-            logger.debug(interface + " was returned when looping interfaces in the old config file")
+        for used_interface in old_config["interface"]:  # For every interface in the old config file.
+            logger.debug(used_interface + " was returned when looping interfaces in the old config file")
             # I want to take the old interface, and match it against the destined interface
-            if isinstance(old_config["interface"][interface]['mode'], list):
+            if isinstance(old_config["interface"][used_interface]['mode'], list):
                 logger.error("Show Running Config is duplicated in the file: " + key + ".log!")
                 exit()
-            if old_config["interface"][interface]["mode"] == "access":  # but only if it's an access interface
-                logger.debug(interface + " is an access interface")
-                int_refactor = interface.split('net')[1].split(
+            if old_config["interface"][used_interface]["mode"] == "access":  # but only if it's an access interface
+                logger.debug(used_interface + " is an access interface")
+                int_refactor = used_interface.split('net')[1].split(
                     '/')  # Start to format the interface to be the same as interface_matrix
                 if get_number_of_elements(int_refactor) == 3:  # fix incase we encounter FA interfaces
                     int_refactor.pop(1)  # fix incase we encounter FA interfaces
@@ -48,7 +51,7 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
                 else:
                     target_interface = target_interface.split("/")
                     target_interface = "GigabitEthernet" + target_interface[0] + "/0/" + target_interface[1]
-                logger.info(interface + " moves to " + target_interface)
+                logger.info(used_interface + " moves to " + target_interface)
                 description = False
                 port_security = False
                 dhcp_snooping = False
@@ -56,21 +59,21 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
                 voice_vlan = False
                 ps_max = False
                 ps_aging_time = False
-                access_vlan = old_config['interface'][interface]["access_vlan"]  # Retain previous data VLAN
-                if old_config['interface'][interface]["description"]:
-                    description = old_config['interface'][interface]["description"]  # Retain old value
-                if old_config['interface'][interface]["voice_vlan"]:
-                    voice_vlan = old_config['interface'][interface]["voice_vlan"]  # Retain old value
-                if old_config['interface'][interface]["ps_max"]:
-                    ps_max = old_config['interface'][interface]["ps_max"]  # Retain old value
+                access_vlan = old_config['interface'][used_interface]["access_vlan"]  # Retain previous data VLAN
+                if old_config['interface'][used_interface]["description"]:
+                    description = old_config['interface'][used_interface]["description"]  # Retain old value
+                if old_config['interface'][used_interface]["voice_vlan"]:
+                    voice_vlan = old_config['interface'][used_interface]["voice_vlan"]  # Retain old value
+                if old_config['interface'][used_interface]["ps_max"]:
+                    ps_max = old_config['interface'][used_interface]["ps_max"]  # Retain old value
                     port_security = True
-                if old_config['interface'][interface]["ps_aging_time"]:
-                    ps_aging_time = old_config['interface'][interface]["ps_aging_time"]  # Retain old value
-                if old_config['interface'][interface]["dhcp_snooping"]:
+                if old_config['interface'][used_interface]["ps_aging_time"]:
+                    ps_aging_time = old_config['interface'][used_interface]["ps_aging_time"]  # Retain old value
+                if old_config['interface'][used_interface]["dhcp_snooping"]:
                     dhcp_snooping = True  # Retain old value
-                if old_config['interface'][interface]["dot1x_pae"] == "authenticator":
+                if old_config['interface'][used_interface]["dot1x_pae"] == "authenticator":
                     interface_aaa = "nac_enforce"  # If dot1x pae is configured, default to NAC enforce mode
-                if old_config['interface'][interface]["auth_open"]:
+                if old_config['interface'][used_interface]["auth_open"]:
                     interface_aaa = "nac_open"  # If authentication open is configured, default to NAC Open mode
                 if svi_nac:
                     if access_vlan in nac_svi:
@@ -91,6 +94,10 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
                 interface_config = templater(input_list, interface_aaa)  # Build interface config
 
                 templated_config.append(interface_config)  # Append interface config to list
+                used_interfaces.append(target_interface.split('net')[1])
+                for counted_interface in used_interfaces:
+                    if counted_interface.split('/')[0] not in counted_stacks:
+                        counted_stacks.append(counted_interface.split('/')[0])
 
         logger.debug(templated_config)
 
@@ -108,11 +115,29 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
         port_channel_config = templater(input_list, 'etherchannel')
         templated_config.append(port_channel_config)
 
+        # Calculate unused interfaces
+
+        logger.debug(capacity)
+        logger.debug(used_interfaces)
+        all_interfaces = []
+        with open("logic_templates/all_interfaces_48.j2") as f:
+            template_file = f.read()
+        t = Template(template_file)
+        for stack in counted_stacks:
+
+            stack_all_interfaces = t.render({"stack": stack}).split('\n')
+            all_interfaces.append(stack_all_interfaces)
+        all_interfaces = [j for i in all_interfaces for j in i]  # merge lists into a single list
+
+        free_interfaces = [x for x in all_interfaces if not x in used_interfaces or used_interfaces.remove(x)]  # discover unused interfaces
+        for free_interface in free_interfaces:
+            shutdown_interface = templater({"interface": "GigabitEthernet" + free_interface}, 'unused')
+            templated_config.append(shutdown_interface)
+
         with open(inventory_matrix[key] + '-' + today.strftime("%d%b%Y%-H%M%S") + '.txt', 'a') as file:
             for command in templated_config:
                 file.write(command)
             file.close()
-
 
 
 def templater(input_lst, interface_type):
@@ -274,12 +299,3 @@ if __name__ == "__main__":
     run_time = time.time() - start_time
     run_time = round(run_time, 2)
     logger.info("Time to run: " + str(run_time) + " seconds")
-
-    """
-    TODO: Trunks
-    - Always channel group 1 on access switches
-    - DHCP Snooping Trust
-    - UDLD always on interface of a etherchannel
-    - Always active.
-    - No filtering of vlans to start
-    """
