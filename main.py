@@ -8,6 +8,7 @@ from collections import ChainMap  # used to merge multiple dictionaries into 1
 from datetime import datetime  # For timing execution time & output file naming
 import os
 
+
 def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
     used_interfaces = []
     counted_stacks = []
@@ -48,12 +49,13 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
                 int_match = int_refactor[0] + '/' + int_refactor[1]  # Formatting done.
                 target_interface = interface_matrix[int_match]  # Find the target interface
 
-                if target_interface == "F":
+                if target_interface == "F":  # Don't do anything for unused ports just yet.
                     continue
                 else:
                     target_interface = target_interface.split("/")
-                    target_interface = "GigabitEthernet" + target_interface[0] + "/0/" + target_interface[1]
+                    target_interface = "GigabitEthernet" + target_interface[0] + "/0/" + target_interface[1]  # format
                 logger.info(used_interface + " moves to " + target_interface)
+                # Prepare variables for input
                 description = False
                 port_security = False
                 dhcp_snooping = False
@@ -77,7 +79,8 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
                     interface_aaa = "nac_enforce"  # If dot1x pae is configured, default to NAC enforce mode
                 if old_config['interface'][used_interface]["auth_open"]:
                     interface_aaa = "nac_open"  # If authentication open is configured, default to NAC Open mode
-                if svi_nac:
+                if svi_nac:  # If this feature is enabled, it will override anything discovered on the old interface
+                    # for NAC.  It helps correct potential mistakes in old config.
                     if access_vlan in nac_svi:
                         interface_aaa = "nac_open"
                     if access_vlan not in nac_svi:
@@ -102,10 +105,10 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
                         counted_stacks.append(counted_interface.split('/')[0])
 
         logger.debug(templated_config)
-
+        # Discover the uplink detail for the switch inside the loop
         uplinks = core_port_workbook_reader(wb_input=rack_port_input, cp_wb_input=inventory_matrix[key])
         for uplink_interface in uplinks:
-            input_list = {
+            input_list = {  # Build the variables for J2 template
                 "interface": uplink_interface['access_side_interface'],
                 "description": "To " + uplink_interface['core_hostname'] + " " + uplink_interface['core_side_interface']
             }
@@ -115,10 +118,11 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
             "description": "To " + uplinks[0]['core_hostname']
         }
         port_channel_config = templater(input_list, 'etherchannel')
-        templated_config.append(port_channel_config)
+        templated_config.append(port_channel_config)  # Add to the output to be written
+
+        # TODO: Misc Trunks go here
 
         # Calculate unused interfaces
-
         logger.debug(capacity)
         logger.debug(used_interfaces)
         all_interfaces = []
@@ -126,16 +130,19 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
             template_file = f.read()
         t = Template(template_file)
         for stack in counted_stacks:
-
+            # Quick way to render total amount of interfaces available.  Based on the total number of stacks being
+            # configured.  IMPORTANT: If a stack is being empty and is empty according to port allocation, those ports
+            # will not be shutdown through this process.  Script only knows of interfaces and stacks existing to the
+            # left of the document.
             stack_all_interfaces = t.render({"stack": stack}).split('\n')
             all_interfaces.append(stack_all_interfaces)
         all_interfaces = [j for i in all_interfaces for j in i]  # merge lists into a single list
-        # discover unused interfaces
+        # discover unused interfaces by subtracting used interfaces from all interfaces
         free_interfaces = [x for x in all_interfaces if x not in used_interfaces or used_interfaces.remove(x)]
         for free_interface in free_interfaces:
             shutdown_interface = templater({"interface": "GigabitEthernet" + free_interface}, 'unused')
             templated_config.append(shutdown_interface)
-
+        # Write the output for the switch.
         with open(inventory_matrix[key] + '-' + today.strftime("%d%b%Y%-H%M%S") + '.txt', 'a') as file:
             for command in templated_config:
                 file.write(command)
