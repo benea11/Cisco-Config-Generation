@@ -303,10 +303,16 @@ if __name__ == "__main__":
     logger.propagate = False
     logger.addHandler(stream)
 
-    excluded_svi_lst = [2]
     core_file = "CSW.log"
     rack_port_xl = "input.xlsx"
+
+    # The following 2 variables toggle and configure the NAC SVI configuration.  If you want to override the old
+    # switch configuration and apply NAC to a port based on if the associated SVI exists on the core switch, set this
+    # to True (it is by default).  If you want to use this feature, but exclude specific VLANs, add them to the
+    # excluded_svi_lst as integers.
     SVI_NAC_option = True
+    excluded_svi_lst = []
+
     main(core_file, rack_port_xl, excluded_svi_lst, SVI_NAC_option)
     run_time = time.time() - start_time
     run_time = round(run_time, 2)
