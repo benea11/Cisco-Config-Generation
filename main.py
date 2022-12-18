@@ -1,7 +1,8 @@
 from openpyxl import load_workbook  # Excel reader
 import confparser  # Author: Tim Dorssers
 from jinja2 import Template  # Templates
-import logging.config, time  # Logger
+import logging.config  # Logger
+import time
 import warnings  # Used to supress warnings from Excel reader
 from collections import ChainMap  # used to merge multiple dictionaries into 1
 from datetime import datetime  # For timing execution time & output file naming
@@ -11,6 +12,7 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
     used_interfaces = []
     counted_stacks = []
     today = datetime.now()
+    capacity = False
     # Read the input xl, retrieve the matrix & to be port allocations
     old_inventory, inventory_matrix = port_availability_workbook_reader(wb_input=rack_port_input)
     # Read core switch to find the active SVIs
@@ -128,8 +130,8 @@ def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
             stack_all_interfaces = t.render({"stack": stack}).split('\n')
             all_interfaces.append(stack_all_interfaces)
         all_interfaces = [j for i in all_interfaces for j in i]  # merge lists into a single list
-
-        free_interfaces = [x for x in all_interfaces if not x in used_interfaces or used_interfaces.remove(x)]  # discover unused interfaces
+        # discover unused interfaces
+        free_interfaces = [x for x in all_interfaces if x not in used_interfaces or used_interfaces.remove(x)]
         for free_interface in free_interfaces:
             shutdown_interface = templater({"interface": "GigabitEthernet" + free_interface}, 'unused')
             templated_config.append(shutdown_interface)
@@ -178,11 +180,11 @@ def core_port_workbook_reader(wb_input, cp_wb_input):
     output = []
     while e_cell < 10000:
         if sheet["E" + str(e_cell)].value == cp_wb_input:
-            output.append({"core_hostname":sheet["A" + str(e_cell)].value,
-                            "core_side_interface":sheet["B" + str(e_cell)].value,
+            output.append({"core_hostname": sheet["A" + str(e_cell)].value,
+                           "core_side_interface": sheet["B" + str(e_cell)].value,
                            "access_hostname": sheet["E" + str(e_cell)].value,
-                           "access_side_interface":sheet["D" + str(e_cell)].value})
-            e_cell +=1
+                           "access_side_interface": sheet["D" + str(e_cell)].value})
+            e_cell += 1
         else:
             e_cell += 1
     return output
