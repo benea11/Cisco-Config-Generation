@@ -6,7 +6,7 @@ import time
 import warnings  # Used to supress warnings from Excel reader
 from collections import ChainMap  # used to merge multiple dictionaries into 1
 from datetime import datetime  # For timing execution time & output file naming
-
+import os
 
 def main(core_switch, rack_port_input, excluded_svi_input, svi_nac):
     used_interfaces = []
@@ -168,6 +168,9 @@ def svi_discovery(core_sw, excluded_svi_list):
 
 
 def config_parse(file):
+    if not os.path.exists(file):
+        logger.critical(file + ": This file does not exist in the directory!")
+        exit()
     dissector = confparser.Dissector.from_file('ios.yaml')
     return dissector.parse_file(file)
 
